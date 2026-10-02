@@ -1,26 +1,94 @@
 @import "tailwindcss";
 
+/* Cada token se define una sola vez con light-dark(); el modo lo decide
+   color-scheme, que el usuario fija en su perfil o deja al sistema. */
+@theme {
+  --font-display: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-roboto-mono), ui-monospace, monospace;
+
+  --color-bg: light-dark(#f1f2f7, #0d0e1a);
+  --color-surface: light-dark(#ffffff, #16182a);
+  --color-sunken: light-dark(#e8eaf1, #11132a);
+  --color-fg: light-dark(#141529, #e9eaf4);
+  --color-mute: light-dark(#646a85, #9aa0bc);
+  --color-line: light-dark(#e2e4ee, #272a42);
+  --color-stamp: light-dark(#5b2ee5, #8a6bff);
+  --color-bar: light-dark(#141529, #080914);
+  --color-bar-fg: light-dark(#eceef6, #e9eaf4);
+  --color-flag: light-dark(#c2185b, #f0518a);
+  --color-seal: light-dark(#0e7c6b, #2fb89f);
+  /* Texto sobre un color sólido: blanco en claro, tinta en oscuro. */
+  --color-oncolor: light-dark(#ffffff, #0d0e1a);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  /* Recorrido: grafito → tinta → sello verde. El avance se lee como saturación. */
+  --st-PROPUESTA: light-dark(#6b7186, #9ba2bd);
+  --st-APROBACION: light-dark(#656bb0, #8d93df);
+  --st-ANALISIS: light-dark(#635bc8, #847df0);
+  --st-ASIGNACION: light-dark(#6344dc, #8a6bff);
+  --st-DESARROLLO: light-dark(#5b2ee5, #9579ff);
+  --st-TEST: light-dark(#7a27d8, #b06af5);
+  --st-VOBO: light-dark(#9a1fbe, #ce6ae0);
+  --st-PRODUCCION: light-dark(#0e7c6b, #2fb89f);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Los menús desplegables son <details>: sin marcador nativo. */
+summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+summary::-webkit-details-marker {
+  display: none;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-stamp);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--color-stamp);
+  color: var(--color-oncolor);
+}
+
+/* Entrada escalonada: el tablero se arma de izquierda a derecha. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.rise {
+  animation: rise 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
 }

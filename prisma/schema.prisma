@@ -1,0 +1,190 @@
+// Esquema de Tomi Plane. Tras cada cambio: npm run db:migrate
+//
+// UNIDAD ─┬─ PROYECTO ─┬─ ETAPA (una por estado, 8 en total) ─┬─ ACTIVIDAD
+//         │            │                                      └─ ACTIVIDAD
+//         └─ personas  └─ PROYECTO ...
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  // Extensiones explícitas: así el seeder corre con node a secas, sin runner de TS.
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Los cuatro roles del sistema. Debe coincidir con ROLES en src/lib/workflow.ts
+enum Role {
+  SA
+  SUP
+  DEP
+  OBS
+}
+
+/// Las ocho etapas del recorrido, en orden. Debe coincidir con STATES en src/lib/workflow.ts
+enum State {
+  PROPUESTA
+  APROBACION
+  ANALISIS
+  ASIGNACION
+  DESARROLLO
+  TEST
+  VOBO
+  PRODUCCION
+}
+
+/// Momento de una etapa dentro del proyecto. Debe coincidir con SITUACIONES en src/lib/workflow.ts
+enum Situacion {
+  PENDIENTE
+  EN_CURSO
+  SOLICITADA
+  CERRADA
+}
+
+/// Cada cuánto se espera un reporte de avance. Debe coincidir con CADENCIAS en src/lib/workflow.ts
+enum Cadencia {
+  HORARIA
+  DIARIA
+  SEMANAL
+}
+
+enum Theme {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+model User {
+  id         Int             @id @default(autoincrement())
+  name       String
+  email      String          @unique
+  password   String
+  role       Role            @default(DEP)
+  theme      Theme           @default(SYSTEM)
+  manager_id Int?
+  /// Unidad que la persona tiene seleccionada; decide qué proyectos ve.
+  unidad_activa_id Int?
+  manager    User?           @relation("equipo", fields: [manager_id], references: [id])
+  unidad_activa Unidad?      @relation("unidadActiva", fields: [unidad_activa_id], references: [id], onDelete: SetNull)
+  reports    User[]          @relation("equipo")
+  unidades   UsuarioUnidad[]
+  proyectos  Proyecto[]      @relation("autorProyecto")
+  etapas     Etapa[]         @relation("responsableEtapa")
+  creadas    Actividad[]     @relation("autorActividad")
+  aprobadas  Actividad[]     @relation("vistoBueno")
+  avances    Avance[]
+  bitacora   Bitacora[]
+}
+
+/// Oficina. Una persona puede pertenecer a varias.
+model Unidad {
+  id        Int             @id @default(autoincrement())
+  nombre    String          @unique
+  miembros  UsuarioUnidad[]
+  proyectos Proyecto[]
+  activa_de User[]          @relation("unidadActiva")
+}
+
+model UsuarioUnidad {
+  user_id   Int
+  unidad_id Int
+  user      User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  unidad    Unidad @relation(fields: [unidad_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, unidad_id])
+}
+
+model Proyecto {
+  id         Int        @id @default(autoincrement())
+  nombre     String
+  detalle    String?
+  /// Público: lo ve todo el personal de la unidad. Reservado: solo superiores.
+  publico    Boolean    @default(true)
+  unidad_id  Int
+  created_by Int
+  created_at DateTime   @default(now())
+  unidad     Unidad     @relation(fields: [unidad_id], references: [id])
+  autor      User       @relation("autorProyecto", fields: [created_by], references: [id])
+  etapas     Etapa[]
+  bitacora   Bitacora[]
+
+  @@index([unidad_id])
+}
+
+/// Una por estado. fecha_inicio la pone el sistema al entrar; fecha_fin es el plazo, opcional.
+model Etapa {
+  id             Int         @id @default(autoincrement())
+  proyecto_id    Int
+  estado         State
+  situacion      Situacion   @default(PENDIENTE)
+  fecha_inicio   DateTime?
+  fecha_fin      DateTime?
+  fecha_cierre   DateTime?
+  responsable_id Int?
+  proyecto       Proyecto    @relation(fields: [proyecto_id], references: [id], onDelete: Cascade)
+  responsable    User?       @relation("responsableEtapa", fields: [responsable_id], references: [id])
+  actividades    Actividad[]
+  bitacora       Bitacora[]
+
+  @@unique([proyecto_id, estado])
+  @@index([situacion])
+}
+
+/// Trabajo concreto dentro de una etapa. Sus fechas van dentro del rango de la etapa.
+model Actividad {
+  id            Int        @id @default(autoincrement())
+  etapa_id      Int
+  nombre        String
+  detalle       String?
+  fecha_inicio  DateTime
+  fecha_fin     DateTime?
+  /// Cada cuánto debe reportarse el avance mientras la actividad siga abierta.
+  cadencia      Cadencia   @default(DIARIA)
+  created_by    Int
+  created_at    DateTime   @default(now())
+  aprobada_at   DateTime?
+  aprobada_por  Int?
+  etapa         Etapa      @relation(fields: [etapa_id], references: [id], onDelete: Cascade)
+  autor         User       @relation("autorActividad", fields: [created_by], references: [id])
+  visto_bueno   User?      @relation("vistoBueno", fields: [aprobada_por], references: [id])
+  avances       Avance[]
+  bitacora      Bitacora[]
+
+  @@index([etapa_id])
+}
+
+/// Un reporte de avance dentro del período programado de la actividad.
+model Avance {
+  id           Int       @id @default(autoincrement())
+  actividad_id Int
+  /// Momento al que corresponde el reporte, dentro del rango de la actividad.
+  fecha        DateTime
+  porcentaje   Int
+  nota         String?
+  user_id      Int
+  created_at   DateTime  @default(now())
+  actividad    Actividad @relation(fields: [actividad_id], references: [id], onDelete: Cascade)
+  user         User      @relation(fields: [user_id], references: [id])
+
+  @@index([actividad_id])
+}
+
+/// Cada movimiento del sistema queda aquí.
+model Bitacora {
+  id           Int        @id @default(autoincrement())
+  at           DateTime   @default(now())
+  user_id      Int
+  accion       String
+  detalle      String?
+  proyecto_id  Int?
+  etapa_id     Int?
+  actividad_id Int?
+  user         User       @relation(fields: [user_id], references: [id])
+  proyecto     Proyecto?  @relation(fields: [proyecto_id], references: [id], onDelete: Cascade)
+  etapa        Etapa?     @relation(fields: [etapa_id], references: [id], onDelete: Cascade)
+  actividad    Actividad? @relation(fields: [actividad_id], references: [id], onDelete: SetNull)
+
+  @@index([proyecto_id])
+}
