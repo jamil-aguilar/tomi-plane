@@ -36,15 +36,17 @@ export default async function ProyectoPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ e?: string }>;
+  searchParams: Promise<{ e?: string; etapa?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
-  const { e: aviso } = await searchParams;
+  const { e: aviso, etapa: etapaPedida } = await searchParams;
   const p: ProyectoRow | undefined = await proyectoVisible(user, Number(id));
   if (!p) notFound();
 
-  const etapa: EtapaRow = p.actual;
+  // Se puede mirar cualquier etapa del proyecto, no solo la que está en curso.
+  const etapa: EtapaRow = p.etapas.find((x) => x.id === Number(etapaPedida)) ?? p.actual;
+  const esActual = etapa.id === p.actual.id;
   const m = mando(p, etapa);
   const jefe = isBoss(m, user);
   // Quien no es parte del proyecto —y todo observador— solo ve el avance.
@@ -57,8 +59,10 @@ export default async function ProyectoPage({
           visto_bueno: { select: { name: true } },
           avances: {
             include: { user: { select: { name: true } } },
+            // user_id hace falta para saber quién puede corregir cada reporte.
             orderBy: [{ fecha: "desc" }, { id: "desc" }],
           },
+          documentos: { orderBy: { id: "asc" } },
         },
         orderBy: [{ fecha_inicio: "asc" }, { id: "asc" }],
       })
@@ -112,7 +116,12 @@ export default async function ProyectoPage({
         </p>
         {p.detalle && <p className="mt-2 max-w-3xl text-[14px] leading-relaxed whitespace-pre-wrap">{p.detalle}</p>}
         <div className="mt-5 border-t border-line pt-4">
-          <Riel etapas={p.etapas} activa={p.etapas.findIndex((x) => x.id === etapa.id)} />
+          <Riel
+            etapas={p.etapas}
+            activa={p.etapas.findIndex((x) => x.id === p.actual.id)}
+            mirando={etapa.id}
+            href={(e) => `/proyectos/${p.id}?etapa=${e}`}
+          />
         </div>
       </section>
 
@@ -134,6 +143,18 @@ export default async function ProyectoPage({
           )}
 
           {parte && (
+          <>
+          {!esActual && (
+            <p className="rounded-[7px] border border-line bg-surface px-4 py-3 text-[13px] text-mute">
+              Estás viendo la etapa <strong className="font-semibold text-fg">{etapa.estado}</strong>,
+              que {etapa.situacion === "CERRADA" ? "ya está cerrada" : "todavía no empieza"}.{" "}
+              <a href={`/proyectos/${p.id}`} className="text-stamp hover:underline">
+                Ir a la etapa en curso
+              </a>
+              .
+            </p>
+          )}
+          {esActual && (
           <>
           {/* ── Plazo de la etapa ────────────────────────────────── */}
           <section className="rounded-[7px] border border-line bg-surface p-4">
@@ -185,6 +206,9 @@ export default async function ProyectoPage({
             )}
           </section>
 
+          </>
+          )}
+
           <PanelActividades
             proyecto_id={p.id}
             etapa={etapa}
@@ -193,7 +217,7 @@ export default async function ProyectoPage({
             puedeVisar={!noPuedeVisar}
           />
 
-          {/* ── Paso a la siguiente etapa ────────────────────────── */}
+          {esActual && (
           <section className="rounded-[7px] border border-line bg-surface p-4">
             <h2 className={label}>Paso a la siguiente etapa</h2>
 
@@ -239,6 +263,7 @@ export default async function ProyectoPage({
               </form>
             )}
           </section>
+          )}
           </>
           )}
         </div>

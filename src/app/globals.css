@@ -18,6 +18,11 @@
   --color-bar-fg: light-dark(#eceef6, #e9eaf4);
   --color-flag: light-dark(#c2185b, #f0518a);
   --color-seal: light-dark(#0e7c6b, #2fb89f);
+  /* Estado de una actividad: cumplida en verde, pendiente en celeste. */
+  --color-hecho: light-dark(#0f7a52, #34c08a);
+  --color-hecho-fondo: light-dark(#e4f6ec, #11291f);
+  --color-pendiente: light-dark(#0b6fa4, #4cb8e8);
+  --color-pendiente-fondo: light-dark(#e2f1fa, #0f2430);
   /* Texto sobre un color sólido: blanco en claro, tinta en oscuro. */
   --color-oncolor: light-dark(#ffffff, #0d0e1a);
 }
@@ -51,6 +56,12 @@ summary {
 }
 
 summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Un desplegable siempre dice cómo cerrarse, sin necesidad de JavaScript. */
+details[open] > summary .al-abrir,
+details:not([open]) > summary .al-cerrar {
   display: none;
 }
 

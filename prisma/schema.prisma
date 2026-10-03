@@ -63,6 +63,12 @@ model User {
   password   String
   role       Role            @default(DEP)
   theme      Theme           @default(SYSTEM)
+  /// Color de marca elegido por la persona, en #rrggbb. Nulo = el de la aplicación.
+  color            String?
+  /// Qué tan vivo se aplica ese color, de 20 a 100.
+  color_intensidad Int        @default(100)
+  /// Opacidad del color, de 20 a 100.
+  color_alpha      Int        @default(100)
   manager_id Int?
   /// Unidad que la persona tiene seleccionada; decide qué proyectos ve.
   unidad_activa_id Int?
@@ -75,6 +81,8 @@ model User {
   creadas    Actividad[]     @relation("autorActividad")
   aprobadas  Actividad[]     @relation("vistoBueno")
   avances    Avance[]
+  documentos Documento[]
+  resets     PasswordReset[]
   bitacora   Bitacora[]
 }
 
@@ -144,15 +152,48 @@ model Actividad {
   cadencia      Cadencia   @default(DIARIA)
   created_by    Int
   created_at    DateTime   @default(now())
+  /// El responsable la da por terminada; después el superior la visa.
+  finalizada_at DateTime?
   aprobada_at   DateTime?
   aprobada_por  Int?
   etapa         Etapa      @relation(fields: [etapa_id], references: [id], onDelete: Cascade)
   autor         User       @relation("autorActividad", fields: [created_by], references: [id])
   visto_bueno   User?      @relation("vistoBueno", fields: [aprobada_por], references: [id])
   avances       Avance[]
+  documentos    Documento[]
   bitacora      Bitacora[]
 
   @@index([etapa_id])
+}
+
+/// PDF adjunto a una actividad. El binario vive en disco; aquí solo la referencia.
+model Documento {
+  id           Int       @id @default(autoincrement())
+  actividad_id Int
+  /// Nombre con el que lo subió la persona.
+  nombre       String
+  /// Nombre en disco, dentro de ARCHIVOS_DIR/doc_actividades.
+  archivo      String    @unique
+  bytes        Int
+  subido_por   Int
+  created_at   DateTime  @default(now())
+  actividad    Actividad @relation(fields: [actividad_id], references: [id], onDelete: Cascade)
+  autor        User      @relation(fields: [subido_por], references: [id])
+
+  @@index([actividad_id])
+}
+
+/// Un pedido de recuperación de contraseña. Se guarda el hash, nunca el token.
+model PasswordReset {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  token_hash String   @unique
+  expira     DateTime
+  usado_at   DateTime?
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 /// Un reporte de avance dentro del período programado de la actividad.

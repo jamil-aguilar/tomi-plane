@@ -141,6 +141,25 @@ export function avanceAtrasado(a: Reportable, ultimo: Date | null, ahora = new D
   return vence !== null && ahora > vence;
 }
 
+/**
+ * Un avance se corrige mientras la actividad siga abierta: una vez finalizada
+ * o visada, el historial queda como está.
+ */
+export function editarAvanceError(
+  etapa: Mandable,
+  a: { finalizada_at: Date | null; aprobada_at: Date | null },
+  avance: { user_id: number },
+  user: Mover,
+): string | null {
+  if (!canWrite(user)) return "Los observadores solo pueden consultar";
+  if (etapa.situacion === "CERRADA") return "La etapa ya está cerrada";
+  if (a.aprobada_at) return "La actividad ya tiene el visto bueno";
+  if (a.finalizada_at) return "La actividad está finalizada; reábrela para corregir sus avances";
+  if (avance.user_id !== user.id && !isBoss(etapa, user))
+    return "Solo quien registró el avance o el superior puede corregirlo";
+  return null;
+}
+
 /** Un avance vive dentro del período programado. null = válido. */
 export function avanceError(a: Reportable, fecha: Date, porcentaje: number): string | null {
   if (a.aprobada_at) return "La actividad ya tiene el visto bueno; no admite más avances";
@@ -151,6 +170,38 @@ export function avanceError(a: Reportable, fecha: Date, porcentaje: number): str
     return `La actividad empieza el ${corta(a.fecha_inicio)}; no se puede reportar antes`;
   if (a.fecha_fin && fecha > endOf(a.fecha_fin))
     return `La actividad termina el ${corta(a.fecha_fin)}; no se puede reportar después`;
+  return null;
+}
+
+export type Editable = {
+  aprobada_at: Date | null;
+  created_by: number;
+};
+
+/**
+ * Quién puede retocar o borrar una actividad: quien la creó, quien ejecuta la
+ * etapa, o el superior. Una vez visada, solo el superior.
+ */
+export function editarActividadError(
+  etapa: Mandable,
+  a: Editable,
+  user: Mover,
+): string | null {
+  if (!canWrite(user)) return "Los observadores solo pueden consultar";
+  if (etapa.situacion === "CERRADA") return "La etapa ya está cerrada";
+  if (a.aprobada_at && !isBoss(etapa, user))
+    return "La actividad ya tiene el visto bueno; solo el superior puede cambiarla";
+  if (user.id !== a.created_by && !isEjecutor(etapa, user))
+    return "Solo el responsable de la etapa o quien la creó puede cambiarla";
+  return null;
+}
+
+/** Finalizar es del responsable; el visto bueno sigue siendo del superior. */
+export function finalizarError(etapa: Mandable, a: Editable, user: Mover): string | null {
+  if (!canWrite(user)) return "Los observadores solo pueden consultar";
+  if (etapa.situacion === "CERRADA") return "La etapa ya está cerrada";
+  if (a.aprobada_at) return "La actividad ya tiene el visto bueno";
+  if (!isEjecutor(etapa, user)) return "Solo el responsable de la etapa puede finalizarla";
   return null;
 }
 

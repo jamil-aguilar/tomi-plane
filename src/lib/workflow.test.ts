@@ -7,7 +7,10 @@ import {
   STATES,
   avanceAtrasado,
   avanceError,
+  editarActividadError,
+  editarAvanceError,
   esParteDelProyecto,
+  finalizarError,
   isBoss,
   proximoAvance,
   nextState,
@@ -185,4 +188,65 @@ test("los avances caen dentro de la programación de la actividad", () => {
     avanceError(actividad("DIARIA", new Date()), new Date(2026, 9, 12), 50)!,
     /ya tiene el visto bueno/,
   );
+});
+
+const act = (created_by = 2, aprobada_at: Date | null = null) => ({ created_by, aprobada_at });
+
+test("editar y eliminar una actividad", () => {
+  assert.equal(editarActividadError(etapa(), act(), DEP), null, "el responsable de la etapa");
+  assert.equal(editarActividadError(etapa(), act(9), DEP), null, "aunque la haya creado otro");
+  assert.equal(editarActividadError(etapa(), act(), SUP), null, "el superior");
+  assert.equal(
+    editarActividadError(etapa("EN_CURSO", 9), act(2), DEP),
+    null,
+    "quien la creó, aunque ya no ejecute la etapa",
+  );
+  assert.match(
+    editarActividadError(etapa("EN_CURSO", 9), act(5), DEP)!,
+    /Solo el responsable de la etapa o quien la creó/,
+  );
+  assert.match(editarActividadError(etapa(), act(), OBS)!, /observadores/);
+  assert.match(editarActividadError(etapa("CERRADA"), act(), SUP)!, /etapa ya está cerrada/);
+  assert.match(
+    editarActividadError(etapa(), act(2, new Date()), DEP)!,
+    /solo el superior puede cambiarla/,
+    "una vez visada, el dependiente no la toca",
+  );
+  assert.equal(
+    editarActividadError(etapa(), act(2, new Date()), SUP),
+    null,
+    "el superior sí, aun visada",
+  );
+});
+
+test("finalizar es del responsable; el visto bueno sigue siendo del superior", () => {
+  assert.equal(finalizarError(etapa(), act(), DEP), null, "el responsable finaliza");
+  assert.equal(finalizarError(etapa(), act(), SUP), null, "el superior también puede");
+  assert.match(finalizarError(etapa("EN_CURSO", 9), act(), DEP)!, /Solo el responsable/);
+  assert.match(finalizarError(etapa(), act(), OBS)!, /observadores/);
+  assert.match(finalizarError(etapa(), act(2, new Date()), DEP)!, /ya tiene el visto bueno/);
+  assert.match(finalizarError(etapa("CERRADA"), act(), DEP)!, /etapa ya está cerrada/);
+});
+
+const reporte = (user_id = 2) => ({ user_id });
+const abierta = { finalizada_at: null, aprobada_at: null };
+
+test("corregir un avance mientras la actividad siga abierta", () => {
+  assert.equal(editarAvanceError(etapa(), abierta, reporte(2), DEP), null, "quien lo registró");
+  assert.equal(editarAvanceError(etapa(), abierta, reporte(2), SUP), null, "el superior");
+  assert.match(
+    editarAvanceError(etapa(), abierta, reporte(5), DEP)!,
+    /Solo quien registró el avance o el superior/,
+  );
+  assert.match(editarAvanceError(etapa(), abierta, reporte(2), OBS)!, /observadores/);
+  assert.match(
+    editarAvanceError(etapa(), { finalizada_at: new Date(), aprobada_at: null }, reporte(2), DEP)!,
+    /reábrela para corregir/,
+    "finalizada: el historial se congela hasta reabrirla",
+  );
+  assert.match(
+    editarAvanceError(etapa(), { finalizada_at: new Date(), aprobada_at: new Date() }, reporte(2), SUP)!,
+    /ya tiene el visto bueno/,
+  );
+  assert.match(editarAvanceError(etapa("CERRADA"), abierta, reporte(2), SUP)!, /etapa ya está cerrada/);
 });

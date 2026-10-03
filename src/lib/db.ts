@@ -15,6 +15,24 @@ export const prisma: PrismaClient =
 if (process.env.NODE_ENV !== "production") g.__prisma = prisma;
 
 /** Unidades a las que pertenece la persona. El SA alcanza a todas. */
+/**
+ * Encuentra a la persona por su correo completo o solo por la parte de antes
+ * de la arroba. Si esa parte coincide con más de una cuenta, no resuelve:
+ * entrar en la cuenta equivocada sería peor que pedir el correo entero.
+ */
+export async function buscarPorUsuario(entrada: string): Promise<User | null> {
+  const texto = entrada.trim().toLowerCase();
+  if (!texto) return null;
+  const exacto = await prisma.user.findUnique({ where: { email: texto } });
+  if (exacto) return exacto;
+  if (texto.includes("@")) return null;
+  const candidatos = await prisma.user.findMany({
+    where: { email: { startsWith: `${texto}@` } },
+    take: 2,
+  });
+  return candidatos.length === 1 ? candidatos[0] : null;
+}
+
 export async function unidadesDe(user: User) {
   if (user.role === "SA") return prisma.unidad.findMany({ orderBy: { nombre: "asc" } });
   return prisma.unidad.findMany({

@@ -2,9 +2,15 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { randomBytes, createHash } from "node:crypto";
+import { unlink } from "node:fs/promises";
 import { clearSession, requireUser, setSession } from "@/lib/auth";
+import { guardarPdf, rutaDe } from "@/lib/archivos";
+import { ES_HEX, recorta } from "@/lib/apariencia";
+import { correoDeRecuperacion, enviar } from "@/lib/correo";
 import {
   anotar,
+  buscarPorUsuario,
   crearProyecto,
   cumplimiento,
   hashPassword,
@@ -20,7 +26,10 @@ import {
   THEMES,
   avanceError,
   canWrite,
+  editarActividadError,
+  editarAvanceError,
   esParteDelProyecto,
+  finalizarError,
   isBoss,
   isRole,
   nextState,
@@ -38,8 +47,13 @@ const fecha = (fd: FormData, k: string) => (str(fd, k) ? new Date(`${str(fd, k)}
 /** <input type="datetime-local"> llega como 2026-10-12T09:30, sin zona. */
 const momento = (fd: FormData, k: string) => (str(fd, k) ? new Date(str(fd, k)) : null);
 
-const volver = (id: number, e?: string) =>
-  redirect(`/proyectos/${id}${e ? `?e=${encodeURIComponent(e)}` : ""}`);
+const volver = (id: number, e?: string, etapa?: number) => {
+  const q = new URLSearchParams();
+  if (etapa) q.set("etapa", String(etapa));
+  if (e) q.set("e", e);
+  const cola = q.toString();
+  redirect(`/proyectos/${id}${cola ? `?${cola}` : ""}`);
+};
 
 async function etapaDe(userId: number, proyectoId: number, etapaId: number) {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
@@ -53,16 +67,96 @@ async function etapaDe(userId: number, proyectoId: number, etapaId: number) {
 // ── sesión ────────────────────────────────────────────────────────────────
 
 export async function login(fd: FormData) {
-  const email = str(fd, "email").toLowerCase();
-  const u = await prisma.user.findUnique({ where: { email } });
+  // Acepta el correo completo o solo el usuario: jamil o jamil@local.
+  const u = await buscarPorUsuario(str(fd, "email"));
   if (!u || !verifyPassword(str(fd, "password"), u.password)) redirect("/login?e=1");
   await setSession(u.id);
   redirect("/");
 }
 
+const MINUTOS_RESET = 30;
+
+/** Siempre responde igual, haya o no cuenta: no delata qué correos existen. */
+export async function pedirRecuperacion(fd: FormData) {
+  const u = await buscarPorUsuario(str(fd, "email"));
+  if (u) {
+    const token = randomBytes(32).toString("base64url");
+    await prisma.passwordReset.create({
+      data: {
+        user_id: u.id,
+        token_hash: createHash("sha256").update(token).digest("hex"),
+        expira: new Date(Date.now() + MINUTOS_RESET * 60_000),
+      },
+    });
+    const base = process.env.APP_URL ?? "http://localhost:3000";
+    const { texto, html } = correoDeRecuperacion(u.name, `${base}/restablecer/${token}`, MINUTOS_RESET);
+    try {
+      await enviar(u.email, "Restablecer tu contraseña de TOMY", texto, html);
+    } catch {
+      redirect("/olvide?e=No se pudo enviar el correo. Avisa al administrador.");
+    }
+  }
+  redirect("/olvide?ok=1");
+}
+
+export async function restablecer(fd: FormData) {
+  const token = str(fd, "token");
+  const clave = str(fd, "password");
+  const volverAlForm = (m: string) => redirect(`/restablecer/${token}?e=${encodeURIComponent(m)}`);
+  if (clave.length < 6) volverAlForm("La contraseña necesita al menos 6 caracteres");
+  if (clave !== str(fd, "password2")) volverAlForm("Las dos contraseñas no coinciden");
+
+  const pedido = await prisma.passwordReset.findUnique({
+    where: { token_hash: createHash("sha256").update(token).digest("hex") },
+  });
+  if (!pedido || pedido.usado_at || pedido.expira < new Date())
+    redirect("/olvide?e=Ese enlace ya venció o fue usado. Pide uno nuevo.");
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: pedido!.user_id }, data: { password: hashPassword(clave) } }),
+    prisma.passwordReset.update({ where: { id: pedido!.id }, data: { usado_at: new Date() } }),
+    // Cualquier otro pedido abierto deja de servir.
+    prisma.passwordReset.updateMany({
+      where: { user_id: pedido!.user_id, usado_at: null },
+      data: { usado_at: new Date() },
+    }),
+  ]);
+  await anotar({ user_id: pedido!.user_id, accion: "CONTRASENA_RESTABLECIDA" });
+  redirect("/login?ok=1");
+}
+
 export async function logout() {
   await clearSession();
   redirect("/login");
+}
+
+/** Tema y color de marca. Todo opcional: sin color, manda el de la aplicación. */
+export async function guardarApariencia(fd: FormData) {
+  const user = await requireUser();
+  const theme = str(fd, "theme");
+  const data: { theme?: Theme; color?: string | null; color_intensidad?: number; color_alpha?: number } =
+    {};
+  if (THEMES.includes(theme as Theme)) data.theme = theme as Theme;
+
+  if (str(fd, "restablecer") === "si") {
+    data.color = null;
+    data.color_intensidad = 100;
+    data.color_alpha = 100;
+  } else {
+    // La rueda solo manda si la movieron; si no, vale la muestra que marcaron.
+    const rueda = str(fd, "color").toLowerCase();
+    const muestra = str(fd, "sugerido").toLowerCase();
+    const anterior = (user.color ?? "#5b2ee5").toLowerCase();
+    const hex = rueda && rueda !== anterior ? rueda : muestra || rueda;
+    if (hex && !ES_HEX.test(hex)) redirect("/apariencia");
+    if (hex) data.color = hex;
+    data.color_intensidad = recorta(Number(str(fd, "intensidad")));
+    data.color_alpha = recorta(Number(str(fd, "alpha")));
+  }
+
+  await prisma.user.update({ where: { id: user.id }, data });
+  revalidatePath("/", "layout");
+  redirect("/apariencia?ok=1");
 }
 
 /** Cambia la unidad en la que trabaja la persona. Solo entre las suyas. */
@@ -277,7 +371,7 @@ export async function nuevaActividad(fd: FormData) {
     etapa_id: e.id,
     actividad_id: a.id,
   });
-  volver(p.id);
+  volver(p.id, undefined, e.id);
 }
 
 /** Registra un avance de una actividad abierta, dentro de su programación. */
@@ -315,7 +409,217 @@ export async function registrarAvance(fd: FormData) {
     etapa_id: e.id,
     actividad_id: a!.id,
   });
-  volver(p.id);
+  volver(p.id, undefined, e.id);
+}
+
+/** Busca la actividad y comprueba de una vez quién puede tocarla. */
+async function actividadDe(fd: FormData, regla: "editar" | "finalizar") {
+  const { user, p, e } = await etapaDe(
+    (await requireUser()).id,
+    Number(str(fd, "proyecto_id")),
+    Number(str(fd, "etapa_id")),
+  );
+  const a = await prisma.actividad.findFirst({
+    where: { id: Number(str(fd, "actividad_id")), etapa_id: e.id },
+  });
+  if (!a) volver(p.id, "Esa actividad no existe");
+  if (!esParteDelProyecto(pertenencia(p), mando(p, e), user))
+    volver(p.id, "No eres parte de este proyecto");
+  const err =
+    regla === "editar"
+      ? editarActividadError(mando(p, e), a!, user)
+      : finalizarError(mando(p, e), a!, user);
+  if (err) volver(p.id, err);
+  return { user, p, e, a: a! };
+}
+
+export async function editarActividad(fd: FormData) {
+  const { user, p, e, a } = await actividadDe(fd, "editar");
+  const nombre = str(fd, "nombre");
+  const inicio = fecha(fd, "fecha_inicio");
+  if (!nombre || !inicio) volver(p.id, "La actividad necesita nombre y fecha de inicio");
+  const fin = fecha(fd, "fecha_fin");
+  const err = rangoError(e, inicio!, fin);
+  if (err) volver(p.id, err);
+  const cadencia = str(fd, "cadencia");
+  if (!["HORARIA", "DIARIA", "SEMANAL"].includes(cadencia))
+    volver(p.id, "Elige cada cuánto se reporta el avance");
+  await prisma.actividad.update({
+    where: { id: a.id },
+    data: {
+      nombre,
+      detalle: str(fd, "detalle") || null,
+      fecha_inicio: inicio!,
+      fecha_fin: fin,
+      cadencia: cadencia as Cadencia,
+    },
+  });
+  await anotar({
+    user_id: user.id,
+    accion: "ACTIVIDAD_EDITADA",
+    detalle: a.nombre === nombre ? nombre : `${a.nombre} → ${nombre}`,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+    actividad_id: a.id,
+  });
+  volver(p.id, undefined, e.id);
+}
+
+export async function eliminarActividad(fd: FormData) {
+  const { user, p, e, a } = await actividadDe(fd, "editar");
+  // Los PDF en disco no los borra la base: hay que sacarlos a mano.
+  const docs = await prisma.documento.findMany({ where: { actividad_id: a.id } });
+  await prisma.actividad.delete({ where: { id: a.id } });
+  for (const d of docs) await unlink(rutaDe(d.archivo)).catch(() => {});
+  await anotar({
+    user_id: user.id,
+    accion: "ACTIVIDAD_ELIMINADA",
+    detalle: a.nombre,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+  });
+  volver(p.id, undefined, e.id);
+}
+
+/** El responsable la da por terminada, o deshace si se apuró. */
+export async function finalizarActividad(fd: FormData) {
+  const { user, p, e, a } = await actividadDe(fd, "finalizar");
+  const terminada = a.finalizada_at === null;
+  await prisma.actividad.update({
+    where: { id: a.id },
+    data: { finalizada_at: terminada ? new Date() : null },
+  });
+  await anotar({
+    user_id: user.id,
+    accion: terminada ? "ACTIVIDAD_FINALIZADA" : "ACTIVIDAD_REABIERTA",
+    detalle: a.nombre,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+    actividad_id: a.id,
+  });
+  volver(p.id, undefined, e.id);
+}
+
+/** Busca un avance y comprueba quién puede corregirlo. */
+async function avanceDe(fd: FormData) {
+  const { user, p, e } = await etapaDe(
+    (await requireUser()).id,
+    Number(str(fd, "proyecto_id")),
+    Number(str(fd, "etapa_id")),
+  );
+  const avance = await prisma.avance.findFirst({
+    where: { id: Number(str(fd, "avance_id")), actividad: { etapa_id: e.id } },
+    include: { actividad: true },
+  });
+  if (!avance) volver(p.id, "Ese avance ya no existe", e.id);
+  if (!esParteDelProyecto(pertenencia(p), mando(p, e), user))
+    volver(p.id, "No eres parte de este proyecto", e.id);
+  const err = editarAvanceError(mando(p, e), avance!.actividad, avance!, user);
+  if (err) volver(p.id, err, e.id);
+  return { user, p, e, avance: avance! };
+}
+
+export async function editarAvance(fd: FormData) {
+  const { user, p, e, avance } = await avanceDe(fd);
+  const cuando = momento(fd, "fecha") ?? avance.fecha;
+  const porcentaje = Number(str(fd, "porcentaje"));
+  const err = avanceError(avance.actividad, cuando, porcentaje);
+  if (err) volver(p.id, err, e.id);
+  await prisma.avance.update({
+    where: { id: avance.id },
+    data: { fecha: cuando, porcentaje, nota: str(fd, "nota") || null },
+  });
+  await anotar({
+    user_id: user.id,
+    accion: "AVANCE_CORREGIDO",
+    detalle: `${avance.actividad.nombre} · ${avance.porcentaje}% → ${porcentaje}%`,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+    actividad_id: avance.actividad_id,
+  });
+  volver(p.id, undefined, e.id);
+}
+
+export async function eliminarAvance(fd: FormData) {
+  const { user, p, e, avance } = await avanceDe(fd);
+  await prisma.avance.delete({ where: { id: avance.id } });
+  await anotar({
+    user_id: user.id,
+    accion: "AVANCE_ELIMINADO",
+    detalle: `${avance.actividad.nombre} · ${avance.porcentaje}%`,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+    actividad_id: avance.actividad_id,
+  });
+  volver(p.id, undefined, e.id);
+}
+
+/** Adjunta un PDF a una actividad. Opcional. */
+export async function subirDocumento(fd: FormData) {
+  const { user, p, e } = await etapaDe(
+    (await requireUser()).id,
+    Number(str(fd, "proyecto_id")),
+    Number(str(fd, "etapa_id")),
+  );
+  if (!canWrite(user)) volver(p.id, "Los observadores solo pueden consultar");
+  if (!esParteDelProyecto(pertenencia(p), mando(p, e), user))
+    volver(p.id, "No eres parte de este proyecto");
+  const a = await prisma.actividad.findFirst({
+    where: { id: Number(str(fd, "actividad_id")), etapa_id: e.id },
+  });
+  if (!a) volver(p.id, "Esa actividad no existe");
+
+  const file = fd.get("archivo");
+  if (!(file instanceof File) || file.size === 0) volver(p.id, "Elige un PDF para adjuntar");
+  const guardado = await guardarPdf(file as File);
+  if ("error" in guardado) volver(p.id, guardado.error);
+  const ok = guardado as { archivo: string; bytes: number; nombre: string };
+
+  const doc = await prisma.documento.create({
+    data: {
+      actividad_id: a!.id,
+      nombre: ok.nombre,
+      archivo: ok.archivo,
+      bytes: ok.bytes,
+      subido_por: user.id,
+    },
+  });
+  await anotar({
+    user_id: user.id,
+    accion: "DOCUMENTO_ADJUNTADO",
+    detalle: `${a!.nombre} · ${ok.nombre}`,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+    actividad_id: a!.id,
+  });
+  revalidatePath(`/proyectos/${p.id}`);
+  void doc;
+  volver(p.id, undefined, e.id);
+}
+
+export async function borrarDocumento(fd: FormData) {
+  const { user, p, e } = await etapaDe(
+    (await requireUser()).id,
+    Number(str(fd, "proyecto_id")),
+    Number(str(fd, "etapa_id")),
+  );
+  const doc = await prisma.documento.findFirst({
+    where: { id: Number(str(fd, "documento_id")), actividad: { etapa_id: e.id } },
+  });
+  if (!doc) volver(p.id, "Ese documento ya no existe");
+  // Lo quita quien lo subió, o el superior de la etapa.
+  if (doc!.subido_por !== user.id && !isBoss(mando(p, e), user))
+    volver(p.id, "Solo quien lo subió o el superior puede quitarlo");
+  await prisma.documento.delete({ where: { id: doc!.id } });
+  await unlink(rutaDe(doc!.archivo)).catch(() => {});
+  await anotar({
+    user_id: user.id,
+    accion: "DOCUMENTO_QUITADO",
+    detalle: doc!.nombre,
+    proyecto_id: p.id,
+    etapa_id: e.id,
+  });
+  volver(p.id, undefined, e.id);
 }
 
 export async function visarActividad(fd: FormData) {
@@ -346,7 +650,7 @@ export async function visarActividad(fd: FormData) {
     etapa_id: e.id,
     actividad_id: a!.id,
   });
-  volver(p.id);
+  volver(p.id, undefined, e.id);
 }
 
 // ── administración ────────────────────────────────────────────────────────

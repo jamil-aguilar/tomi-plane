@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test src/lib/workflow.test.ts",
+    "test": "node --test src/lib/*.test.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "node prisma/seed.ts",
     "db:reset": "prisma migrate reset",
@@ -18,12 +18,14 @@
     "@prisma/client": "^7.10.0",
     "dotenv": "^18.0.5",
     "next": "16.3.8",
+    "nodemailer": "^10.0.14",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26.6.3",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // Los PDF viajan por un Server Action; el tope por defecto es 1 MB.
+    serverActions: { bodySizeLimit: "10mb" },
+  },
 };
 
 export default nextConfig;

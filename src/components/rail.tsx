@@ -61,6 +61,7 @@ export function BoardRail({ counts }: { counts: Record<string, number> }) {
 }
 
 export type Parada = {
+  id: number;
   estado: State;
   situacion: string;
   fecha_inicio: Date | null;
@@ -73,12 +74,25 @@ export type Parada = {
  * Hoja de ruta del proyecto: las ocho etapas selladas con las iniciales de
  * quien las ejecutó, la que está en curso, y las que faltan.
  */
-export function Riel({ etapas, activa }: { etapas: Parada[]; activa: number }) {
+export function Riel({
+  etapas,
+  activa,
+  mirando,
+  href,
+}: {
+  etapas: Parada[];
+  /** Índice de la etapa en curso. */
+  activa: number;
+  /** Id de la etapa que se está mirando, si no es la en curso. */
+  mirando?: number;
+  href?: (etapaId: number) => string;
+}) {
   return (
     <ol aria-label="Etapas del proyecto" className="flex items-start gap-1">
       {etapas.map((e, i) => {
         const cerrada = e.situacion === "CERRADA";
         const aqui = i === activa;
+        const seMira = mirando === e.id;
         const tarde = vencida(e.fecha_fin, e.fecha_cierre);
         const color = tarde && !cerrada ? "var(--color-flag)" : `var(--st-${e.estado})`;
         return (
@@ -90,7 +104,8 @@ export function Riel({ etapas, activa }: { etapas: Parada[]; activa: number }) {
                 style={{ background: cerrada || aqui ? dim(e.estado, 35) : "var(--color-line)" }}
               />
             )}
-            <div
+            <Marca
+              href={href?.(e.id)}
               className="relative flex h-[26px] w-[26px] items-center justify-center rounded-full font-mono text-[9.5px] font-semibold"
               style={{
                 background: aqui ? color : cerrada ? dim(e.estado, 14) : "var(--color-surface)",
@@ -98,7 +113,11 @@ export function Riel({ etapas, activa }: { etapas: Parada[]; activa: number }) {
                 border: aqui
                   ? "none"
                   : `1px ${cerrada ? "solid" : "dashed"} ${cerrada ? dim(e.estado, 45) : "var(--color-line)"}`,
-                boxShadow: aqui ? `0 0 0 3px ${dim(e.estado, 18)}` : "none",
+                boxShadow: aqui
+                  ? `0 0 0 3px ${dim(e.estado, 18)}`
+                  : seMira
+                    ? "0 0 0 2px var(--color-mute)"
+                    : "none",
                 opacity: cerrada || aqui ? 1 : 0.6,
               }}
               title={`${e.estado} · ${SITUACIONES[e.situacion as keyof typeof SITUACIONES]}${
@@ -110,7 +129,7 @@ export function Riel({ etapas, activa }: { etapas: Parada[]; activa: number }) {
                   ? initials(e.responsable.name)
                   : "✓"
                 : String(i + 1).padStart(2, "0")}
-            </div>
+            </Marca>
             <span
               className="w-full truncate text-center font-mono text-[9px] tracking-wide uppercase"
               style={{ color: aqui ? color : "var(--color-mute)", opacity: aqui ? 1 : 0.6 }}
@@ -130,6 +149,21 @@ export function Riel({ etapas, activa }: { etapas: Parada[]; activa: number }) {
         );
       })}
     </ol>
+  );
+}
+
+/** La parada es un enlace cuando se puede abrir esa etapa; si no, un recuadro. */
+function Marca({
+  href,
+  children,
+  ...resto
+}: { href?: string; children: React.ReactNode } & React.HTMLAttributes<HTMLElement>) {
+  return href ? (
+    <a href={href} {...resto}>
+      {children}
+    </a>
+  ) : (
+    <div {...resto}>{children}</div>
   );
 }
 

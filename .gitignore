@@ -42,3 +42,6 @@ next-env.d.ts
 
 
 /src/generated/prisma
+
+# archivos subidos
+/file-tmp/doc_actividades/*

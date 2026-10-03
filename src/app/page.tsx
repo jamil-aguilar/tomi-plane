@@ -4,7 +4,18 @@ import { proyectosVisibles, unidadActiva, type ProyectoRow } from "@/lib/db";
 import { SITUACIONES, STATES } from "@/lib/workflow";
 import { BoardRail, dia, initials, vencida } from "@/components/rail";
 
-function Tarjeta({ p, i, mostrarUnidad }: { p: ProyectoRow; i: number; mostrarUnidad: boolean }) {
+function Tarjeta({
+  p,
+  i,
+  mostrarUnidad,
+  mia,
+}: {
+  p: ProyectoRow;
+  i: number;
+  mostrarUnidad: boolean;
+  /** Tengo alguna etapa de este proyecto a mi cargo. */
+  mia: boolean;
+}) {
   const e = p.actual;
   const tarde = vencida(e.fecha_fin, e.fecha_cierre);
   const hechas = p.etapas.filter((x) => x.situacion === "CERRADA").length;
@@ -12,14 +23,32 @@ function Tarjeta({ p, i, mostrarUnidad }: { p: ProyectoRow; i: number; mostrarUn
     <li className="rise" style={{ animationDelay: `${90 + i * 25}ms` }}>
       <Link
         href={`/proyectos/${p.id}`}
-        className="group block rounded-[7px] border border-line bg-surface p-3 transition-all hover:-translate-y-px"
+        className="group block rounded-[7px] border bg-surface p-3 transition-all hover:-translate-y-px"
         style={{
+          // Los proyectos a mi cargo se encienden; el resto conserva su tono de etapa.
+          borderColor: mia ? "var(--color-stamp)" : "var(--color-line)",
           borderLeft: `3px solid var(--st-${e.estado})`,
-          boxShadow: `0 1px 2px color-mix(in oklab, var(--st-${e.estado}) 10%, transparent)`,
+          background: mia
+            ? "color-mix(in oklab, var(--color-stamp) 7%, var(--color-surface))"
+            : "var(--color-surface)",
+          boxShadow: mia
+            ? "0 2px 14px -4px var(--color-stamp)"
+            : `0 1px 2px color-mix(in oklab, var(--st-${e.estado}) 10%, transparent)`,
         }}
       >
         <div className="flex items-baseline justify-between gap-2">
-          <span className="font-mono text-[10px] text-mute">#{String(p.id).padStart(3, "0")}</span>
+          <span className="flex items-center gap-1.5">
+            {mia && (
+              <span
+                className="rounded-[3px] px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-wide text-oncolor uppercase"
+                style={{ background: "var(--color-stamp)" }}
+                title="Tienes una etapa de este proyecto a tu cargo"
+              >
+                a mi cargo
+              </span>
+            )}
+            <span className="font-mono text-[10px] text-mute">#{String(p.id).padStart(3, "0")}</span>
+          </span>
           <span className="flex min-w-0 items-center gap-1.5">
             {!p.publico && (
               <span
@@ -67,7 +96,12 @@ function Tarjeta({ p, i, mostrarUnidad }: { p: ProyectoRow; i: number; mostrarUn
               >
                 {initials(e.responsable.name)}
               </span>
-              <span className="truncate text-[11.5px] text-mute">{e.responsable.name}</span>
+              <span
+                className="truncate text-[11.5px]"
+                style={{ color: mia ? "var(--color-stamp)" : "var(--color-mute)", fontWeight: mia ? 600 : 400 }}
+              >
+                {e.responsable.name}
+              </span>
             </>
           ) : (
             <span className="font-mono text-[10.5px] text-mute opacity-70">sin responsable</span>
@@ -112,6 +146,7 @@ export default async function Tablero() {
         </p>
       </div>
     );
+  const mios = proyectos.filter((p) => p.etapas.some((x) => x.responsable_id === user.id)).length;
   const counts = Object.fromEntries(
     STATES.map((s) => [s, proyectos.filter((p) => p.actual.estado === s).length]),
   );
@@ -136,6 +171,12 @@ export default async function Tablero() {
             </>
           )}
         </p>
+        {mios > 0 && (
+          <p className="mt-1.5 text-[13px] text-mute">
+            <span className="font-semibold text-stamp">{mios}</span>{" "}
+            {mios === 1 ? "está a tu cargo" : "están a tu cargo"}.
+          </p>
+        )}
         <div className="mt-4">
           <BoardRail counts={counts} />
         </div>
@@ -185,7 +226,13 @@ export default async function Tablero() {
                 </header>
                 <ul className="space-y-2">
                   {col.map((p, j) => (
-                    <Tarjeta key={p.id} p={p} i={j} mostrarUnidad={!unidad} />
+                    <Tarjeta
+                      key={p.id}
+                      p={p}
+                      i={j}
+                      mostrarUnidad={!unidad}
+                      mia={p.etapas.some((x) => x.responsable_id === user.id)}
+                    />
                   ))}
                 </ul>
                 {col.length === 0 && (

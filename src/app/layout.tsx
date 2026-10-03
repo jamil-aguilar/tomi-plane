@@ -4,6 +4,7 @@ import { Roboto, Roboto_Mono } from "next/font/google";
 import { currentUser } from "@/lib/auth";
 import { unidadActiva } from "@/lib/db";
 import { ROLES, canWrite } from "@/lib/workflow";
+import { marca } from "@/lib/apariencia";
 import { cambiarTema, elegirUnidad, logout } from "./actions";
 import "./globals.css";
 
@@ -45,6 +46,8 @@ const TEMA = { SYSTEM: ["Sistema", "◐"], LIGHT: ["Claro", "☀"], DARK: ["Oscu
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
   const [nombreTema, glifo] = TEMA[user?.theme ?? "SYSTEM"];
+  // El color elegido pisa los tokens de la hoja de estilos, sin tocar el resto.
+  const tono = user?.color ? marca(user.color, user.color_intensidad, user.color_alpha) : null;
   const { unidad, opciones } = user
     ? await unidadActiva(user)
     : { unidad: null, opciones: [] as { id: number; nombre: string }[] };
@@ -63,6 +66,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       lang="es"
       data-theme={user && user.theme !== "SYSTEM" ? user.theme.toLowerCase() : undefined}
       className={`${roboto.variable} ${robotoMono.variable}`}
+      style={
+        tono
+          ? ({ "--color-stamp": tono.stamp, "--color-oncolor": tono.oncolor } as React.CSSProperties)
+          : undefined
+      }
     >
       <body className="min-h-screen">
         <header className="sticky top-0 z-30 border-b border-white/5 bg-bar text-bar-fg shadow-[0_1px_16px_-6px_rgba(0,0,0,0.6)]">
@@ -170,6 +178,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                         <p className="truncate text-[13px] font-semibold">{user.name}</p>
                         <p className="truncate text-[11.5px] text-mute">{ROLES[user.role]}</p>
                       </div>
+                      <div className="my-1 h-px bg-line" />
+                      <Link
+                        href="/apariencia"
+                        className="block rounded-md px-2.5 py-2 text-[13px] transition-colors hover:bg-sunken"
+                      >
+                        Apariencia
+                      </Link>
                       <div className="my-1 h-px bg-line" />
                       <nav className="md:hidden">
                         {enlaces.map((l) => (

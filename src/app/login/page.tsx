@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import { STATES } from "@/lib/workflow";
@@ -6,9 +7,13 @@ import { login } from "../actions";
 const field =
   "w-full rounded-[4px] border border-line bg-surface px-3 py-2.5 text-[14px] placeholder:text-mute focus:border-stamp focus:outline-none";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ e?: string }> }) {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ e?: string; ok?: string }>;
+}) {
   if (await currentUser()) redirect("/");
-  const { e } = await searchParams;
+  const { e, ok } = await searchParams;
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-sm flex-col justify-center">
       <p className="font-mono text-[10px] tracking-[0.18em] text-mute uppercase">Tomi Plane</p>
@@ -28,12 +33,23 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       </ol>
 
       <form action={login} className="mt-7 space-y-2.5">
-        {e && (
-          <p className="rounded-[4px] border border-flag/40 px-2.5 py-1.5 text-[12.5px] text-flag">
-            Ese correo y contraseña no coinciden. Intenta de nuevo.
+        {ok && (
+          <p className="rounded-[4px] border border-line px-2.5 py-1.5 text-[12.5px]">
+            Contraseña cambiada. Ya puedes entrar con ella.
           </p>
         )}
-        <input name="email" type="email" required placeholder="Correo" autoComplete="email" className={field} />
+        {e && (
+          <p className="rounded-[4px] border border-flag/40 px-2.5 py-1.5 text-[12.5px] text-flag">
+            Ese usuario y contraseña no coinciden. Intenta de nuevo.
+          </p>
+        )}
+        <input
+          name="email"
+          required
+          placeholder="Usuario o correo"
+          autoComplete="username"
+          className={field}
+        />
         <input
           name="password"
           type="password"
@@ -45,6 +61,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <button className="w-full rounded-[4px] bg-stamp px-3 py-2.5 text-[14px] font-semibold text-oncolor transition-opacity hover:opacity-90">
           Entrar
         </button>
+        <Link
+          href="/olvide"
+          className="block pt-1 text-center text-[13px] text-mute hover:text-fg"
+        >
+          Olvidé mi contraseña
+        </Link>
       </form>
     </div>
   );
